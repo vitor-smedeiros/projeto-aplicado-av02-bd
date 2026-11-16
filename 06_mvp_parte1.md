@@ -84,6 +84,8 @@ Cada atributo das classes tem o mesmo nome da coluna correspondente do dicionár
 | + relatorio_calibracao()   (JOIN das 3 tabelas)             |
 | + atualizar_departamento_tecnico(id, novo_departamento)     |
 | + atualizar_medicao(id, novo_valor_obtido)                  |
+| + deletar_tecnico(id) / deletar_equipamento(id)             |
+| + deletar_medicao(id)                                       |
 +------------------------------------------------------------+
    ..> depende de TecnicoSolicitante, Equipamento e Medicao
        (persiste e reconstrói esses objetos via SQL)
@@ -101,11 +103,20 @@ O sistema trata erros em duas camadas distintas.
 
 **Camada de persistência (integridade do banco).** Os métodos de `BancoDados` capturam as exceções do `sqlite3`, desfazem a transação com `rollback()` e levantam exceções próprias, para que o chamador **não possa ignorar a falha** sem querer:
 - `RegistroDuplicadoError`: disparada pela restrição `UNIQUE` de `codigo_tag`. Como a TAG é normalizada em maiúsculas, `pad-001` e `PAD-001` são tratadas como o mesmo equipamento.
-- `ErroBanco` (classe base): cobre violações de chave estrangeira (medição apontando para equipamento ou técnico inexistente) e qualquer outra falha do SQLite.
+- `ErroBanco` (classe base): cobre violações de chave estrangeira (medição apontando para equipamento ou técnico inexistente, ou exclusão de um equipamento/técnico que ainda possui medições) e qualquer outra falha do SQLite.
 
-O padrão é o mesmo em todos os casos: ou o `commit()` é confirmado, ou o `rollback()` desfaz tudo, e nunca fica uma transação parcial. A integridade referencial definida em `03_banco.sql` (`FOREIGN KEY ... ON DELETE RESTRICT ON UPDATE CASCADE`) é de fato verificada porque `PRAGMA foreign_keys = ON` é ativado logo na conexão (o SQLite ignora chaves estrangeiras por padrão). Na prática, o banco impede apagar um equipamento ou técnico que já possui medições.
+O padrão é o mesmo em todos os casos: ou o `commit()` é confirmado, ou o `rollback()` desfaz tudo, e nunca fica uma transação parcial. A integridade referencial definida em `03_banco.sql` (`FOREIGN KEY ... ON DELETE RESTRICT ON UPDATE CASCADE`) é de fato verificada porque `PRAGMA foreign_keys = ON` é ativado logo na conexão (o SQLite ignora chaves estrangeiras por padrão). Na prática, o banco impede apagar um equipamento ou técnico que já possui medições: `deletar_equipamento` e `deletar_tecnico` capturam essa recusa, desfazem a transação e levantam `ErroBanco` com uma mensagem que explica o vínculo. Excluir um `id` que não existe não é erro: o método apenas retorna `False`.
 
 ## 5. Validação do Fluxo Funcional do MVP
+
+O MVP implementa o CRUD completo na classe `BancoDados`:
+
+| Operação | Métodos |
+| :--- | :--- |
+| Create | `inserir_tecnico`, `inserir_equipamento`, `inserir_medicao` |
+| Read | `listar_tecnicos`, `listar_equipamentos`, `buscar_medicao`, `relatorio_calibracao` (JOIN das 3 tabelas) |
+| Update | `atualizar_departamento_tecnico`, `atualizar_medicao` (recalcula o status) |
+| Delete | `deletar_tecnico`, `deletar_equipamento`, `deletar_medicao` |
 
 O script `05_main.py` demonstra o ciclo completo de uso. Todos os dados são exemplos escritos no próprio script.
 
@@ -117,14 +128,13 @@ O script `05_main.py` demonstra o ciclo completo de uso. Todos os dados são exe
 6. **Erros tratados — dados inválidos:** tolerância inferior positiva, medição sem equipamento/técnico (`id` nulo) e medição com chaves inexistentes (recusada pelo banco).
 7. **Relatório consolidado:** `relatorio_calibracao()` executa um `JOIN` entre as três tabelas, e o relatório é impresso com a contagem de aprovadas e reprovadas.
 8. **Atualização de dados:** o departamento de uma signatária é alterado e o valor obtido da medição reprovada é corrigido, o que recalcula automaticamente seu status para `Aprovado`.
-9. **Relatório final e listagens:** o relatório é reimpresso refletindo as atualizações, e técnicos e equipamentos são listados.
+9. **Exclusão de dados (Delete):** primeiro, a tentativa de excluir o instrumento `703.1208`, que ainda tem medições, é recusada pelo banco (`ON DELETE RESTRICT`) e tratada como `ErroBanco`. Depois são excluídos, nesta ordem, a medição do padrão, o próprio padrão `PAD-001` (que ficou sem medições) e o solicitante `Usinagem I` (sem medições). Excluir um `id` inexistente retorna `False`.
+10. **Relatório final e listagens:** o relatório é reimpresso refletindo as atualizações e exclusões (3 medições restantes, todas aprovadas), e técnicos e equipamentos são listados.
 
-Esse fluxo cobre as quatro operações exigidas (criação de tabelas, inserção, consulta com `JOIN` e atualização), além de quatro cenários de erro tratado.
+Esse fluxo cobre as quatro operações do CRUD (Create, Read com `JOIN`, Update e Delete), além da criação das tabelas e de cinco cenários de erro tratado.
 
 **Verificação de coerência.** Foi feita uma checagem automática (fora do `05_main.py`) comparando: (a) as colunas e tipos das três tabelas criadas pelo código com o `02_dicionario.md`; (b) o DDL das tabelas criadas pelo código com o do `03_banco.sql` executado diretamente; (c) os atributos das classes com os campos do dicionário. Os três resultados foram idênticos.
 
 ## 6. Limitações Conhecidas e Próximos Passos
 
-- **Sem histórico de alterações.** `atualizar_medicao` sobrescreve `valor_obtido` e `status_aprovacao`, e o modelo atual (`03_banco.sql`) não tem tabela de auditoria. O `01_estrutura.md` menciona rastreabilidade para auditorias (ISO/IEC 17025); para atender a isso por completo, uma versão futura deve registrar quem alterou, quando, e o valor anterior.
-- **Sem data da medição.** O modelo definido no `02_dicionario.md` não possui campo de data, portanto o MVP também não registra. Se o certificado precisar da data de calibração, o campo deve ser acrescentado primeiro ao dicionário e ao `03_banco.sql`, e depois ao código.
-- **Dados de entrada fixos.** O `05_main.py` é uma demonstração com dados de exemplo. Os próximos passos previstos são: importar os arquivos de exportação da MMC (lotes de medições), oferecer uma interface para cadastro e consulta, gerar o certificado a partir da consulta e, por último, empacotar a aplicação em um executável.
+**Dados de entrada fixos.** O `05_main.py` é uma demonstração com dados de exemplo. Os próximos passos previstos são: importar os arquivos de exportação da MMC (lotes de medições), oferecer uma interface para cadastro e consulta, gerar o certificado a partir da consulta e, por último, empacotar a aplicação em um executável.

@@ -1,29 +1,22 @@
 """
 04_classes.py - Camada de domínio e de persistência do MVP (Schulz S.A.)
 
-Este módulo segue EXATAMENTE o modelo definido em:
+Este módulo segue o modelo definido em:
     01_estrutura.md  -> as 3 entidades (Técnico/Solicitante, Equipamento, Medição)
     02_dicionario.md -> nomes e tipos de cada campo
     03_banco.sql     -> DDL das tabelas (é o próprio arquivo executado aqui)
-
-Regra do projeto: os nomes de tabelas e colunas existem em UM lugar só, o
-03_banco.sql. As classes usam os mesmos nomes do dicionário de dados.
 """
 
 import math
 import os
 import sqlite3
 
-# Caminho do 03_banco.sql, sempre relativo a este arquivo (e não à pasta
-# de onde o programa foi executado).
+# Caminho do 03_banco.sql
 CAMINHO_SQL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "03_banco.sql")
 
 STATUS_APROVADO = "Aprovado"
 STATUS_REPROVADO = "Reprovado"
 
-# Casas decimais usadas ao comparar valores com a tolerância. Evita que o erro
-# de ponto flutuante (ex.: 100.03 - 100 = 0.030000000000001137) reprove uma
-# medição que está exatamente no limite.
 CASAS_DECIMAIS = 9
 
 
@@ -472,3 +465,50 @@ class BancoDados:
             self.conexao.rollback()
             raise ErroBanco(f"Erro ao atualizar medição: {erro}") from erro
         return True
+
+    # ---------------- DELETE ----------------
+    def _deletar(self, sql, id_registro, msg_vinculo, msg_erro):
+        """
+        Executa um DELETE por id. Retorna True se removeu uma linha e False se o
+        id não existe. Se o banco recusar por chave estrangeira (ON DELETE
+        RESTRICT do 03_banco.sql), desfaz a transação e levanta ErroBanco.
+        """
+        try:
+            cursor = self.conexao.execute(sql, (id_registro,))
+            self.conexao.commit()
+        except sqlite3.IntegrityError as erro:
+            self.conexao.rollback()
+            raise ErroBanco(msg_vinculo) from erro
+        except sqlite3.Error as erro:
+            self.conexao.rollback()
+            raise ErroBanco(f"{msg_erro}: {erro}") from erro
+        return cursor.rowcount > 0
+
+    def deletar_tecnico(self, id_tecnico):
+        """Exclui um técnico/solicitante. Recusado se ele tiver medições."""
+        return self._deletar(
+            "DELETE FROM Tecnico_Solicitante WHERE id_tecnico = ?",
+            id_tecnico,
+            "Não é possível excluir o técnico/solicitante: existem medições "
+            "vinculadas a ele.",
+            "Erro ao excluir técnico/solicitante",
+        )
+
+    def deletar_equipamento(self, id_equipamento):
+        """Exclui um equipamento. Recusado se ele tiver medições."""
+        return self._deletar(
+            "DELETE FROM Equipamento WHERE id_equipamento = ?",
+            id_equipamento,
+            "Não é possível excluir o equipamento: existem medições vinculadas "
+            "a ele.",
+            "Erro ao excluir equipamento",
+        )
+
+    def deletar_medicao(self, id_medicao):
+        """Exclui uma medição (não tem registros dependentes)."""
+        return self._deletar(
+            "DELETE FROM Medicao WHERE id_medicao = ?",
+            id_medicao,
+            "Não foi possível excluir a medição por violação de integridade.",
+            "Erro ao excluir medição",
+        )
