@@ -3,7 +3,7 @@
 
 Todos os dados abaixo são EXEMPLOS escritos neste arquivo: não vêm de
 nenhuma planilha nem da MMC. Servem para provar que o sistema cria o banco,
-grava, consulta (JOIN), atualiza e trata erros.
+grava, consulta (JOIN), atualiza, exclui e trata erros (CRUD completo).
 
 Os nomes dos campos são os do 02_dicionario.md / 03_banco.sql.
 """
@@ -141,7 +141,32 @@ def main():
 
         imprimir_relatorio(banco.relatorio_calibracao())
 
-        # ---- 5. Consultas simples -------------------------------------------
+        # ---- 5. Exclusões (Delete) ------------------------------------------
+        print("\n>> Exclusões (Delete)...")
+
+        # Erro tratado nº 5: e1 ainda tem medições, então o banco recusa
+        # (FOREIGN KEY ... ON DELETE RESTRICT do 03_banco.sql).
+        try:
+            banco.deletar_equipamento(e1.id_equipamento)
+        except ErroBanco as erro:
+            print(f"Erro tratado (esperado): {erro}")
+
+        # Exclusões permitidas. Ordem importa: primeiro a medição do padrão,
+        # depois o padrão (que fica sem medições) e o solicitante sem medições.
+        if banco.deletar_medicao(m4.id_medicao):
+            print(f"Medição {m4.id_medicao} ({m4.parametro_avaliado}) excluída.")
+        if banco.deletar_equipamento(e2.id_equipamento):
+            print(f"Equipamento {e2.codigo_tag} excluído (já sem medições).")
+        if banco.deletar_tecnico(t3.id_tecnico):
+            print(f"Solicitante '{t3.nome}' excluído (sem medições).")
+
+        # Id que não existe: nada é excluído e o método retorna False.
+        print(f"Excluir medição inexistente (id 999) retorna: "
+              f"{banco.deletar_medicao(999)}")
+
+        imprimir_relatorio(banco.relatorio_calibracao())
+
+        # ---- 6. Consultas simples -------------------------------------------
         print("\n>> Técnicos/solicitantes cadastrados:")
         for t in banco.listar_tecnicos():
             print(f"  {t}")
